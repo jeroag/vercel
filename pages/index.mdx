@@ -1,20 +1,275 @@
----
-type: page
-title: About
-date: 2021-03-19
----
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>Sheet → HTML Table (with Total Profit)</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <style>
+    :root { font-family: system-ui, Arial, sans-serif; }
+    body { margin: 24px; background: #0b0b0c; color: #e8e8ea; }
+    .card { background: #131317; border: 1px solid #2a2a31; border-radius: 16px; padding: 16px; max-width: 1100px; margin: 0 auto; }
+    h1 { margin: 0 0 8px; font-size: 20px; }
+    .row { display: grid; gap: 8px; grid-template-columns: 1fr 1fr; margin: 12px 0; }
+    .row > div { display: flex; gap: 8px; align-items: center; }
+    input, button, select {
+      background: #0f0f13; color: #e8e8ea; border: 1px solid #2a2a31; border-radius: 10px; padding: 10px 12px;
+    }
+    input::placeholder { color: #8b8b95; }
+    button { cursor: pointer; }
+    button.primary { background: #1f6feb; border-color: #2b73ff; }
+    .help { color: #a8a8b3; font-size: 12px; margin-top: 4px; }
+    .status { margin-top: 10px; font-size: 13px; color: #a8ffb1; }
+    .error { color: #ff9aa2; }
+    table { width: 100%; border-collapse: collapse; margin-top: 12px; font-size: 14px; }
+    th, td { border: 1px solid #2a2a31; padding: 8px 10px; vertical-align: top; }
+    th { background: #1a1a20; position: sticky; top: 0; }
+    .hidden { display: none !important; }
+    .controls { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+    .pill { font-size: 12px; padding: 4px 8px; border-radius: 999px; background:#1a1f2e; border:1px solid #2a3550; }
+    #totalProfit { margin-top: 15px; font-size: 16px; font-weight: bold; color: #00ff9d; }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <h1>Sheet → HTML Table</h1>
+    <div class="help">
+      <div>Google Sheets: Share → <b>Anyone with the link → Viewer</b></div>
+      <div>Excel: Save as <b>CSV</b> and use CSV input (or upload local CSV)</div>
+    </div>
 
-# Your Name
+    <div class="row">
+      <div>
+        <label class="pill">Mode</label>
+        <select id="mode">
+          <option value="gsheet">Google Sheet</option>
+          <option value="csv">CSV (https://docs.google.com/spreadsheets/d/1JgHJmIw0JhqIN0bXtibCMse8suYVaRD-5I0LunvzCPg/edit?usp=sharing)</option>
+        </select>
+      </div>
+      <div class="controls">
+        <input id="search" type="search" placeholder="Search rows..." />
+        <button id="clear">Clear</button>
+      </div>
+    </div>
 
-Hey, I'm a Senior Software Engineer at Company. I enjoy working with Next.js and crafting beautiful front-end experiences.
+    <!-- Google Sheet inputs -->
+    <div id="gsheetInputs" class="row">
+      <input id="sheetId" placeholder="Google Sheet ID (d/.../d ke beech wala)" />
+      <input id="sheetName" placeholder="Tab/Sheet Name (e.g., Sheet1, Data)" />
+    </div>
 
-This portfolio is built with **Next.js** and a library called [Nextra](https://nextra.vercel.app/). It allows you to write Markdown and focus on the _content_ of your portfolio.
+    <!-- CSV inputs -->
+    <div id="csvInputs" class="row hidden">
+      <input id="csvUrl" placeholder="CSV file URL (public)" />
+      <div>
+        <input type="file" id="csvFile" accept=".csv" />
+      </div>
+    </div>
 
-[**Deploy your own**](https://vercel.com/new/clone?demo-title=Portfolio+Starter+Kit&demo-description=Easily+create+a+portfolio+with+Next.js+and+Markdown.&demo-url=https%3A%2F%2Fdemo.vercel.blog%2F&demo-image=%2F%2Fimages.ctfassets.net%2Fe5382hct74si%2F2aC4eHLrOKmT4fnLfoNGK2%2F14b1e6bbe598ec023ffe85001d31e634%2FCleanShot_2022-04-11_at_23.12.01.png&project-name=Portfolio+Starter+Kit&repository-name=portfolio-starter-kit&repository-url=https%3A%2F%2Fgithub.com%2Fvercel%2Fnextjs-portfolio-starter&from=templates&skippable-integrations=1&teamCreateStatus=hidden) in a few minutes.
+    <div class="controls">
+      <button class="primary" id="loadBtn">Load Data</button>
+      <span class="status" id="status"></span>
+    </div>
 
----
+    <div id="tableWrap"></div>
+    <div id="totalProfit"></div>
+  </div>
 
-- Twitter [@yourname](https://twitter.com/yourname)
-- GitHub [@yourname](https://github.com/yourname)
-- Instagram [@yourname](https://instagram.com/yourname)
-- Email your@name.com
+  <script>
+    const q = (s) => document.querySelector(s);
+    const statusEl = q('#status');
+    const tableWrap = q('#tableWrap');
+    const totalProfitEl = q('#totalProfit');
+
+    q('#mode').addEventListener('change', (e) => {
+      const val = e.target.value;
+      q('#gsheetInputs').classList.toggle('hidden', val !== 'gsheet');
+      q('#csvInputs').classList.toggle('hidden', val !== 'csv');
+      tableWrap.innerHTML = '';
+      totalProfitEl.textContent = '';
+      status('');
+    });
+
+    q('#clear').addEventListener('click', () => {
+      q('#search').value = '';
+      filterTable('');
+    });
+
+    q('#search').addEventListener('input', (e) => filterTable(e.target.value));
+
+    q('#loadBtn').addEventListener('click', async () => {
+      const mode = q('#mode').value;
+      tableWrap.innerHTML = '';
+      totalProfitEl.textContent = '';
+      status('Loading…');
+
+      try {
+        let rows;
+        if (mode === 'gsheet') {
+          const sheetId = q('#sheetId').value.trim();
+          const sheetName = q('#sheetName').value.trim();
+          validateGSheetInputs(sheetId, sheetName);
+          rows = await fetchGoogleSheet(sheetId, sheetName);
+        } else {
+          const file = q('#csvFile').files[0];
+          const url = q('#csvUrl').value.trim();
+          if (!file && !url) throw new Error('CSV URL ya local CSV file de do.');
+          rows = file ? await parseLocalCSV(file) : await fetchCSV(url);
+        }
+
+        if (!rows || !rows.length) throw new Error('No data found.');
+        renderTable(rows);
+        calculateTotalProfit(rows);
+        status(`Loaded ${rows.length - 1} rows.`);
+      } catch (err) {
+        error(err.message || String(err));
+      }
+    });
+
+    function status(msg) { statusEl.classList.remove('error'); statusEl.textContent = msg || ''; }
+    function error(msg) { statusEl.classList.add('error'); statusEl.textContent = '❌ ' + msg; }
+
+    function validateGSheetInputs(sheetId, sheetName) {
+      if (!sheetId) throw new Error('Sheet ID missing. Link me "/d/…/edit" ke beech ka ID daalo.');
+      if (!sheetName) throw new Error('Sheet Name missing. Bottom tab ka exact naam daalo.');
+    }
+
+    async function fetchGoogleSheet(sheetId, sheetName) {
+      const url = `https://docs.google.com/spreadsheets/d/${encodeURIComponent(sheetId)}/gviz/tq?tqx=out:json&sheet=${encodeURIComponent(sheetName)}`;
+      const res = await fetch(url, { cache: 'no-store' });
+      if (res.status === 403) throw new Error('Access denied (403). Share → Anyone with the link → Viewer enable karo.');
+      if (res.status === 404) throw new Error('Sheet not found (404). Sheet ID/Name check karo.');
+      if (!res.ok) throw new Error(`Network error: ${res.status}`);
+      const text = await res.text();
+      const jsonStr = text.replace(/^[^{]+/, '').replace(/;?\s*$/, '');
+      let data;
+      try {
+        data = JSON.parse(jsonStr.match(/\{[\s\S]*\}/)[0]);
+      } catch {
+        throw new Error('Parsing failed. Aksar ye tab name galat ya sharing off hone se hota hai.');
+      }
+      if (!data.table || !data.table.cols) throw new Error('Invalid GViz data. Sheet structure check karo.');
+      const headers = data.table.cols.map(c => (c && c.label) ? c.label : '').map(s => s || '');
+      const rows = data.table.rows.map(r => (r.c || []).map(cell => (cell && cell.v != null) ? cell.v : ''));
+      return [headers, ...rows];
+    }
+
+    async function fetchCSV(url) {
+      const res = await fetch(url, { cache: 'no-store' });
+      if (!res.ok) throw new Error(`CSV fetch failed: ${res.status}`);
+      const text = await res.text();
+      return parseCSVText(text);
+    }
+
+    function parseLocalCSV(file) {
+      return new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onerror = () => reject(new Error('CSV read failed.'));
+        reader.onload = () => resolve(parseCSVText(String(reader.result)));
+        reader.readAsText(file);
+      });
+    }
+
+    function parseCSVText(text) {
+      const rows = [];
+      let cur = '', row = [], inQ = false;
+      for (let i = 0; i < text.length; i++) {
+        const ch = text[i], next = text[i+1];
+        if (ch === '"') {
+          if (inQ && next === '"') { cur += '"'; i++; }
+          else inQ = !inQ;
+        } else if (ch === ',' && !inQ) {
+          row.push(cur); cur = '';
+        } else if ((ch === '\n' || ch === '\r') && !inQ) {
+          if (cur.length || row.length) { row.push(cur); rows.push(row); row = []; cur=''; }
+        } else { cur += ch; }
+      }
+      if (cur.length || row.length) { row.push(cur); rows.push(row); }
+      return rows;
+    }
+
+    function renderTable(rows) {
+      const [header = [], ...body] = rows;
+      const table = document.createElement('table');
+      const thead = document.createElement('thead');
+      const trH = document.createElement('tr');
+      header.forEach(h => {
+        const th = document.createElement('th');
+        th.textContent = String(h ?? '');
+        trH.appendChild(th);
+      });
+      thead.appendChild(trH);
+      table.appendChild(thead);
+
+      const tbody = document.createElement('tbody');
+      body.forEach(r => {
+        const tr = document.createElement('tr');
+        header.forEach((_, i) => {
+          const td = document.createElement('td');
+          td.textContent = r[i] != null ? String(r[i]) : '';
+          tr.appendChild(td);
+        });
+        tbody.appendChild(tr);
+      });
+      table.appendChild(tbody);
+
+      tableWrap.innerHTML = '';
+      tableWrap.appendChild(table);
+      tableWrap.dataset.rowsJson = JSON.stringify(rows);
+      filterTable(q('#search').value);
+    }
+
+    function calculateTotalProfit(rows) {
+      const header = rows[0].map(h => h.toString().toLowerCase());
+      const profitIndex = header.findIndex(h => h.includes("profit") || h.includes("p&l"));
+      if (profitIndex === -1) {
+        totalProfitEl.textContent = "⚠️ 'Profit' column not found.";
+        return;
+      }
+
+      let total = 0;
+      rows.slice(1).forEach(r => {
+        const val = parseFloat(String(r[profitIndex]).replace(/[^0-9.-]/g, ""));
+        if (!isNaN(val)) total += val;
+      });
+      totalProfitEl.textContent = `💰 Total Profit: ₹${total.toFixed(2)}`;
+
+    }
+
+    function filterTable(query) {
+      const stored = tableWrap.dataset.rowsJson;
+      if (!stored) return;
+      const rows = JSON.parse(stored);
+      const qy = (query || '').toLowerCase().trim();
+      const [header, ...body] = rows;
+      const filtered = !qy ? body : body.filter(r =>
+        r.some(v => String(v ?? '').toLowerCase().includes(qy))
+      );
+      const table = document.createElement('table');
+      const thead = document.createElement('thead');
+      const trH = document.createElement('tr');
+      header.forEach(h => {
+        const th = document.createElement('th');
+        th.textContent = String(h ?? '');
+        trH.appendChild(th);
+      });
+      thead.appendChild(trH);
+      table.appendChild(thead);
+      const tbody = document.createElement('tbody');
+      filtered.forEach(r => {
+        const tr = document.createElement('tr');
+        header.forEach((_, i) => {
+          const td = document.createElement('td');
+          td.textContent = r[i] != null ? String(r[i]) : '';
+          tr.appendChild(td);
+        });
+        tbody.appendChild(tr);
+      });
+      table.appendChild(tbody);
+      tableWrap.innerHTML = '';
+      tableWrap.appendChild(table);
+      const count = filtered.length;
+      status(count === body.length ? '' : `Filtered: ${count}/${body.length} rows`);
+    }
+  </script>
+</body>
+</html>
